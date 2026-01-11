@@ -468,7 +468,7 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         chat = await context.bot.get_chat(chat_id)
         
-        # First, completely unmute the user
+        # Create full permissions object
         full_permissions = ChatPermissions(
             can_send_messages=True,
             can_send_audios=True,
@@ -482,89 +482,120 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             can_add_web_page_previews=True
         )
         
-        # Unmute WITHOUT until_date to clear all restrictions
-        await chat.restrict_member(user_id, full_permissions)
+        # Try multiple unmute methods
+        success = False
+        error_messages = []
         
-        await delete_previous_warnings(chat_id, user_id, context)
+        # Method 1: Standard unmute
+        try:
+            await chat.restrict_member(user_id, full_permissions)
+            success = True
+            logger.info(f"Method 1: Standard unmute successful for user {user_id}")
+        except Exception as e1:
+            error_messages.append(f"Method 1 failed: {str(e1)}")
         
-        await query.edit_message_text(
-            f"✅ {query.from_user.mention_html()} has been unmuted! You'll be temporarily muted for 5 seconds as verification.",
-            parse_mode='HTML'
-        )
-        
-        # Send a temporary notification
-        temp_msg = await context.bot.send_message(
-            chat_id=chat_id,
-            text=f"✅ {query.from_user.mention_html()} verification complete. Temporary 5-second mute applied.",
-            parse_mode='HTML'
-        )
-        
-        # Schedule a 5-second temporary mute after unmute
-        async def apply_temporary_mute():
-            await asyncio.sleep(1)  # Wait 1 second to ensure unmute is processed
-            
+        # If first method failed, try alternative
+        if not success:
+            # Method 2: Try with promote trick
             try:
-                # Apply 5-second temporary mute
-                mute_permissions = ChatPermissions(
-                    can_send_messages=False,
-                    can_send_audios=False,
-                    can_send_documents=False,
-                    can_send_photos=False,
-                    can_send_videos=False,
-                    can_send_video_notes=False,
-                    can_send_voice_notes=False,
-                    can_send_polls=False,
-                    can_send_other_messages=False,
-                    can_add_web_page_previews=False
+                # First try to promote (this often clears restrictions)
+                await context.bot.promote_chat_member(
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    can_change_info=False,
+                    can_post_messages=False,
+                    can_edit_messages=False,
+                    can_delete_messages=False,
+                    can_invite_users=False,
+                    can_restrict_members=False,
+                    can_pin_messages=False,
+                    can_promote_members=False,
+                    can_manage_chat=False,
+                    can_manage_video_chats=False,
+                    can_manage_topics=False
                 )
-                
-                mute_duration = 5  # 5 seconds
-                until_date = int(time.time()) + mute_duration
-                
-                await chat.restrict_member(
-                    user_id, 
-                    mute_permissions,
-                    until_date=until_date
-                )
-                
-                logger.info(f"User {user_id} temporarily muted for 5 seconds in chat {chat_id}")
-                
-                # Schedule final complete unmute after 5 seconds
-                await asyncio.sleep(5)
-                
-                # Final unmute - completely clear all restrictions WITHOUT until_date
+                # Then unmute
                 await chat.restrict_member(user_id, full_permissions)
-                logger.info(f"User {user_id} finally unmuted after 5-second temporary mute")
-                
-                # Send final notification
-                await context.bot.send_message(
-                    chat_id=chat_id,
-                    text=f"✅ {query.from_user.mention_html()} verification complete! You can now participate.",
-                    parse_mode='HTML'
-                )
-                
-            except Exception as e:
-                logger.error(f"Error in temporary mute process: {e}")
+                success = True
+                logger.info(f"Method 2: Promote + unmute successful for user {user_id}")
+            except Exception as e2:
+                error_messages.append(f"Method 2 failed: {str(e2)}")
         
-        # Schedule deletion of the temp message after 3 seconds
-        async def delete_temp_message():
-            await asyncio.sleep(3)
+        # If still not successful, try a third method
+        if not success:
+            # Method 3: Try with temporary admin promotion
             try:
-                await context.bot.delete_message(
+                # Try a more permissive promote
+                await context.bot.promote_chat_member(
                     chat_id=chat_id,
-                    message_id=temp_msg.message_id
+                    user_id=user_id,
+                    can_change_info=False,
+                    can_post_messages=False,
+                    can_edit_messages=False,
+                    can_delete_messages=False,
+                    can_invite_users=True,
+                    can_restrict_members=False,
+                    can_pin_messages=False,
+                    can_promote_members=False,
+                    can_manage_chat=False,
+                    can_manage_video_chats=False,
+                    can_manage_topics=False
                 )
-            except Exception as e:
-                logger.warning(f"Could not delete temp message: {e}")
+                # Then demote back to normal
+                await chat.restrict_member(user_id, full_permissions)
+                success = True
+                logger.info(f"Method 3: Temp promote + unmute successful for user {user_id}")
+            except Exception as e3:
+                error_messages.append(f"Method 3 failed: {str(e3)}")
         
-        # Run both tasks in the background
-        asyncio.create_task(apply_temporary_mute())
-        asyncio.create_task(delete_temp_message())
+        if success:
+            await delete_previous_warnings(chat_id, user_id, context)
+            
+            # Update the button message
+            await query.edit_message_text(
+                f"✅ {query.from_user.mention_html()} has been unmuted successfully!",
+                parse_mode='HTML'
+            )
+            
+            # Send confirmation to chat
+            confirmation_msg = await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"✅ {query.from_user.mention_html()} has been verified and unmuted! Welcome!",
+                parse_mode='HTML'
+            )
+            
+            # Delete confirmation after 10 seconds
+            async def delete_confirmation():
+                await asyncio.sleep(10)
+                try:
+                    await context.bot.delete_message(
+                        chat_id=chat_id,
+                        message_id=confirmation_msg.message_id
+                    )
+                except Exception:
+                    pass
+            
+            asyncio.create_task(delete_confirmation())
+            
+        else:
+            # All methods failed
+            logger.error(f"All unmute methods failed for user {user_id}: {error_messages}")
+            await query.edit_message_text(
+                f"⚠️ {query.from_user.mention_html()}, unmute failed. Please ask an admin to unmute you manually.\n\nErrors: {'; '.join(error_messages[:3])}",
+                parse_mode='HTML'
+            )
+            
+            # Notify admin in the chat
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"⚠️ Admin attention needed: Failed to unmute {query.from_user.mention_html()}. Please unmute them manually.",
+                parse_mode='HTML'
+            )
         
     except Exception as e:
-        logger.error(f"Error processing unmute request: {e}")
+        logger.error(f"Critical error in unmute_button: {e}")
         await query.answer(
-            "⚠️ Failed to process request. Please contact an admin.",
+            "⚠️ Critical error. Please contact an admin immediately.",
             show_alert=True
         )
 
