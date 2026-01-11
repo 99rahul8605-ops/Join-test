@@ -468,7 +468,7 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         chat = await context.bot.get_chat(chat_id)
         
-        # Instead of unmuting immediately, set a 5-second mute
+        # First, set a 5-second mute
         permissions = ChatPermissions(
             can_send_messages=False,
             can_send_audios=False,
@@ -482,7 +482,7 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             can_add_web_page_previews=False
         )
         
-        # Set mute for 5 seconds instead of unmuting
+        # Set mute for 5 seconds
         mute_duration = 5  # 5 seconds
         until_date = int(time.time()) + mute_duration
         
@@ -506,6 +506,28 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='HTML'
         )
         
+        # Schedule full unmute after 5 seconds
+        async def full_unmute_after_delay():
+            await asyncio.sleep(5)
+            try:
+                # Give full permissions after 5 seconds
+                full_permissions = ChatPermissions(
+                    can_send_messages=True,
+                    can_send_audios=True,
+                    can_send_documents=True,
+                    can_send_photos=True,
+                    can_send_videos=True,
+                    can_send_video_notes=True,
+                    can_send_voice_notes=True,
+                    can_send_polls=True,
+                    can_send_other_messages=True,
+                    can_add_web_page_previews=True
+                )
+                await chat.restrict_member(user_id, full_permissions)
+                logger.info(f"User {user_id} fully unmuted in chat {chat_id} after 5-second delay")
+            except Exception as e:
+                logger.error(f"Error in delayed unmute: {e}")
+        
         # Schedule deletion of the temp message after 5 seconds
         async def delete_temp_message():
             await asyncio.sleep(5)
@@ -517,7 +539,8 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 logger.warning(f"Could not delete temp message: {e}")
         
-        # Run the deletion in the background
+        # Run both tasks in the background
+        asyncio.create_task(full_unmute_after_delay())
         asyncio.create_task(delete_temp_message())
         
     except Exception as e:
