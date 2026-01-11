@@ -1,6 +1,7 @@
 import os
 import logging
 import time
+import asyncio
 from threading import Thread
 from datetime import datetime, timedelta
 from flask import Flask
@@ -467,37 +468,62 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         chat = await context.bot.get_chat(chat_id)
         
+        # Instead of unmuting immediately, set a 5-second mute
         permissions = ChatPermissions(
-            can_send_messages=True,
-            can_send_audios=True,
-            can_send_documents=True,
-            can_send_photos=True,
-            can_send_videos=True,
-            can_send_video_notes=True,
-            can_send_voice_notes=True,
-            can_send_polls=True,
-            can_send_other_messages=True,
-            can_add_web_page_previews=True
+            can_send_messages=False,
+            can_send_audios=False,
+            can_send_documents=False,
+            can_send_photos=False,
+            can_send_videos=False,
+            can_send_video_notes=False,
+            can_send_voice_notes=False,
+            can_send_polls=False,
+            can_send_other_messages=False,
+            can_add_web_page_previews=False
         )
         
-        await chat.restrict_member(user_id, permissions)
+        # Set mute for 5 seconds instead of unmuting
+        mute_duration = 5  # 5 seconds
+        until_date = int(time.time()) + mute_duration
+        
+        await chat.restrict_member(
+            user_id, 
+            permissions,
+            until_date=until_date
+        )
         
         await delete_previous_warnings(chat_id, user_id, context)
         
         await query.edit_message_text(
-            f"✅ {query.from_user.mention_html()} has been unmuted!",
+            f"✅ {query.from_user.mention_html()} will be unmuted in 5 seconds!",
             parse_mode='HTML'
         )
         
-        await context.bot.send_message(
+        # Send a temporary message that will be deleted after 5 seconds
+        temp_msg = await context.bot.send_message(
             chat_id=chat_id,
-            text=f"✅ {query.from_user.mention_html()} has been unmuted after verifying channel membership.",
+            text=f"✅ {query.from_user.mention_html()} has joined the channel and will be unmuted in 5 seconds.",
             parse_mode='HTML'
         )
+        
+        # Schedule deletion of the temp message after 5 seconds
+        async def delete_temp_message():
+            await asyncio.sleep(5)
+            try:
+                await context.bot.delete_message(
+                    chat_id=chat_id,
+                    message_id=temp_msg.message_id
+                )
+            except Exception as e:
+                logger.warning(f"Could not delete temp message: {e}")
+        
+        # Run the deletion in the background
+        asyncio.create_task(delete_temp_message())
+        
     except Exception as e:
-        logger.error(f"Error unmuting user: {e}")
+        logger.error(f"Error processing unmute request: {e}")
         await query.answer(
-            "⚠️ Failed to unmute. Please contact an admin.",
+            "⚠️ Failed to process request. Please contact an admin.",
             show_alert=True
         )
 
