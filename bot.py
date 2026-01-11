@@ -468,7 +468,7 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         chat = await context.bot.get_chat(chat_id)
         
-        # Unmute the user immediately first
+        # First, completely unmute the user
         full_permissions = ChatPermissions(
             can_send_messages=True,
             can_send_audios=True,
@@ -482,25 +482,26 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             can_add_web_page_previews=True
         )
         
+        # Unmute WITHOUT until_date to clear all restrictions
         await chat.restrict_member(user_id, full_permissions)
         
         await delete_previous_warnings(chat_id, user_id, context)
         
         await query.edit_message_text(
-            f"✅ {query.from_user.mention_html()} has been unmuted and will be muted again for 5 seconds!",
+            f"✅ {query.from_user.mention_html()} has been unmuted! You'll be temporarily muted for 5 seconds as verification.",
             parse_mode='HTML'
         )
         
         # Send a temporary notification
         temp_msg = await context.bot.send_message(
             chat_id=chat_id,
-            text=f"✅ {query.from_user.mention_html()} has been verified and will be muted for 5 seconds as a verification delay.",
+            text=f"✅ {query.from_user.mention_html()} verification complete. Temporary 5-second mute applied.",
             parse_mode='HTML'
         )
         
-        # Schedule a 5-second mute after unmute
-        async def temporary_mute_after_delay():
-            await asyncio.sleep(2)  # Wait 2 seconds first to ensure unmute is processed
+        # Schedule a 5-second temporary mute after unmute
+        async def apply_temporary_mute():
+            await asyncio.sleep(1)  # Wait 1 second to ensure unmute is processed
             
             try:
                 # Apply 5-second temporary mute
@@ -528,32 +529,22 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 logger.info(f"User {user_id} temporarily muted for 5 seconds in chat {chat_id}")
                 
-                # Send notification about temporary mute
+                # Schedule final complete unmute after 5 seconds
+                await asyncio.sleep(5)
+                
+                # Final unmute - completely clear all restrictions WITHOUT until_date
+                await chat.restrict_member(user_id, full_permissions)
+                logger.info(f"User {user_id} finally unmuted after 5-second temporary mute")
+                
+                # Send final notification
                 await context.bot.send_message(
                     chat_id=chat_id,
-                    text=f"⏳ {query.from_user.mention_html()} has been muted for 5 seconds as a verification delay. You'll be unmuted automatically.",
+                    text=f"✅ {query.from_user.mention_html()} verification complete! You can now participate.",
                     parse_mode='HTML'
                 )
                 
-                # Schedule final unmute after 5 seconds
-                async def final_unmute():
-                    await asyncio.sleep(5)
-                    try:
-                        await chat.restrict_member(user_id, full_permissions)
-                        logger.info(f"User {user_id} finally unmuted after 5-second temporary mute")
-                        
-                        await context.bot.send_message(
-                            chat_id=chat_id,
-                            text=f"✅ {query.from_user.mention_html()} verification complete! You can now participate.",
-                            parse_mode='HTML'
-                        )
-                    except Exception as e:
-                        logger.error(f"Error in final unmute: {e}")
-                
-                asyncio.create_task(final_unmute())
-                
             except Exception as e:
-                logger.error(f"Error in temporary mute: {e}")
+                logger.error(f"Error in temporary mute process: {e}")
         
         # Schedule deletion of the temp message after 3 seconds
         async def delete_temp_message():
@@ -567,7 +558,7 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.warning(f"Could not delete temp message: {e}")
         
         # Run both tasks in the background
-        asyncio.create_task(temporary_mute_after_delay())
+        asyncio.create_task(apply_temporary_mute())
         asyncio.create_task(delete_temp_message())
         
     except Exception as e:
