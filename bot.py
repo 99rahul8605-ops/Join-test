@@ -524,7 +524,6 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     data = query.data.split(':')
     if len(data) != 3 or data[0] != 'unmute':
-        await query.edit_message_text("⚠️ Invalid request. Please try again later.")
         return
     
     chat_id = int(data[1])
@@ -568,11 +567,15 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Get unmute delay from database (default is 0)
         unmute_delay = fsub_data.get('unmute_delay', 0)
         
-        # Update the button message
-        await query.edit_message_text(
-            f"✅ {query.from_user.mention_html()} has verified channel membership!",
-            parse_mode='HTML'
-        )
+        # Delete the warning message (mute message)
+        try:
+            await query.message.delete()
+        except Exception as delete_error:
+            logger.error(f"Error deleting mute message: {delete_error}")
+        
+        # Delete previous warnings from context data
+        if 'user_warnings' in context.chat_data and user_id in context.chat_data['user_warnings']:
+            del context.chat_data['user_warnings'][user_id]
         
         if unmute_delay > 0:
             # Mute user for the configured delay (≥30 seconds)
@@ -614,9 +617,6 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             # Immediate unmute (delay = 0)
             await complete_unmute_immediately(chat_id, user_id, context)
-        
-        # Delete previous warnings
-        await delete_previous_warnings(chat_id, user_id, context)
         
     except Exception as e:
         logger.error(f"Error in unmute process: {e}")
