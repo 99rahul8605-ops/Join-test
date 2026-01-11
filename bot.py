@@ -468,44 +468,53 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        # CRITICAL FIX: To completely remove user from exception list,
-        # we need to use promote_chat_member with minimal permissions
-        # This is the key difference from other bots
+        # First, update the button message to show user will be muted for 10 seconds
+        await query.edit_message_text(
+            f"✅ {query.from_user.mention_html()} has verified channel membership!\n\n"
+            "⏳ You will be muted for 10 seconds and then fully unmuted...",
+            parse_mode='HTML'
+        )
+        
+        # Mute user for 10 seconds instead of immediately unmuting
+        permissions = ChatPermissions(
+            can_send_messages=False,
+            can_send_audios=False,
+            can_send_documents=False,
+            can_send_photos=False,
+            can_send_videos=False,
+            can_send_video_notes=False,
+            can_send_voice_notes=False,
+            can_send_polls=False,
+            can_send_other_messages=False,
+            can_add_web_page_previews=False,
+            can_invite_users=False,
+            can_change_info=False,
+            can_pin_messages=False
+        )
+        
+        # Set mute for 10 seconds
+        mute_duration = 10  # 10 seconds
+        until_date = int(time.time()) + mute_duration
+        
+        await context.bot.restrict_chat_member(
+            chat_id=chat_id,
+            user_id=user_id,
+            permissions=permissions,
+            until_date=until_date
+        )
+        
+        # Send notification about 10-second mute
+        notification_msg = await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"⏳ {query.from_user.mention_html()} has been muted for 10 seconds and will be fully unmuted afterwards.",
+            parse_mode='HTML'
+        )
+        
+        # Wait for 10 seconds
+        await asyncio.sleep(10)
+        
+        # Now completely unmute the user
         try:
-            # First, try to promote the user (this removes restrictions)
-            await context.bot.promote_chat_member(
-                chat_id=chat_id,
-                user_id=user_id,
-                can_change_info=False,
-                can_post_messages=False,
-                can_edit_messages=False,
-                can_delete_messages=False,
-                can_invite_users=False,
-                can_restrict_members=False,
-                can_pin_messages=False,
-                can_promote_members=False,
-                can_manage_chat=False,
-                can_manage_video_chats=False
-            )
-            
-            # Then immediately demote them back to regular member
-            # This clears all permissions and removes from exception list
-            await context.bot.promote_chat_member(
-                chat_id=chat_id,
-                user_id=user_id,
-                can_change_info=False,
-                can_post_messages=False,
-                can_edit_messages=False,
-                can_delete_messages=False,
-                can_invite_users=False,
-                can_restrict_members=False,
-                can_pin_messages=False,
-                can_promote_members=False,
-                can_manage_chat=False,
-                can_manage_video_chats=False
-            )
-            
-            # Now set appropriate permissions for a regular member
             # Get the chat to check its permissions
             chat = await context.bot.get_chat(chat_id)
             
@@ -540,56 +549,37 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     permissions=permissions,
                     until_date=0  # 0 means remove time restriction
                 )
-                
-        except Exception as e:
-            logger.error(f"Error in unmute process: {e}")
-            # Fallback: Try simple restriction removal
+            
+            # Delete the 10-second notification
             try:
-                permissions = ChatPermissions(
-                    can_send_messages=True,
-                    can_send_audios=True,
-                    can_send_documents=True,
-                    can_send_photos=True,
-                    can_send_videos=True,
-                    can_send_video_notes=True,
-                    can_send_voice_notes=True,
-                    can_send_polls=True,
-                    can_send_other_messages=True,
-                    can_add_web_page_previews=True,
-                    can_change_info=True,
-                    can_invite_users=True,
-                    can_pin_messages=True
-                )
-                await context.bot.restrict_chat_member(
+                await context.bot.delete_message(
                     chat_id=chat_id,
-                    user_id=user_id,
-                    permissions=permissions,
-                    until_date=0  # 0 means remove time restriction
+                    message_id=notification_msg.message_id
                 )
-            except Exception as e2:
-                logger.error(f"Fallback unmute also failed: {e2}")
-                await query.answer(
-                    "⚠️ Failed to unmute. Please contact an admin.",
-                    show_alert=True
-                )
-                return
+            except:
+                pass
+            
+            # Send final unmute message
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"✅ {query.from_user.mention_html()} has been fully unmuted! Welcome to the group.",
+                parse_mode='HTML'
+            )
+            
+            await delete_previous_warnings(chat_id, user_id, context)
+            
+        except Exception as e:
+            logger.error(f"Error unmuting user after 10 seconds: {e}")
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"⚠️ {query.from_user.mention_html()} - Failed to fully unmute. Please contact an admin.",
+                parse_mode='HTML'
+            )
         
-        await delete_previous_warnings(chat_id, user_id, context)
-        
-        await query.edit_message_text(
-            f"✅ {query.from_user.mention_html()} has been completely unmuted!",
-            parse_mode='HTML'
-        )
-        
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=f"✅ {query.from_user.mention_html()} has been unmuted after verifying channel membership.",
-            parse_mode='HTML'
-        )
     except Exception as e:
-        logger.error(f"Error unmuting user: {e}")
+        logger.error(f"Error in unmute process: {e}")
         await query.answer(
-            "⚠️ Failed to unmute. Please contact an admin.",
+            "⚠️ Failed to process unmute request. Please contact an admin.",
             show_alert=True
         )
 
