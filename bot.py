@@ -468,69 +468,96 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         chat = await context.bot.get_chat(chat_id)
         
-        # First, set a 5-second mute
-        permissions = ChatPermissions(
-            can_send_messages=False,
-            can_send_audios=False,
-            can_send_documents=False,
-            can_send_photos=False,
-            can_send_videos=False,
-            can_send_video_notes=False,
-            can_send_voice_notes=False,
-            can_send_polls=False,
-            can_send_other_messages=False,
-            can_add_web_page_previews=False
+        # Unmute the user immediately first
+        full_permissions = ChatPermissions(
+            can_send_messages=True,
+            can_send_audios=True,
+            can_send_documents=True,
+            can_send_photos=True,
+            can_send_videos=True,
+            can_send_video_notes=True,
+            can_send_voice_notes=True,
+            can_send_polls=True,
+            can_send_other_messages=True,
+            can_add_web_page_previews=True
         )
         
-        # Set mute for 5 seconds
-        mute_duration = 5  # 5 seconds
-        until_date = int(time.time()) + mute_duration
-        
-        await chat.restrict_member(
-            user_id, 
-            permissions,
-            until_date=until_date
-        )
+        await chat.restrict_member(user_id, full_permissions)
         
         await delete_previous_warnings(chat_id, user_id, context)
         
         await query.edit_message_text(
-            f"✅ {query.from_user.mention_html()} will be unmuted in 5 seconds!",
+            f"✅ {query.from_user.mention_html()} has been unmuted and will be muted again for 5 seconds!",
             parse_mode='HTML'
         )
         
-        # Send a temporary message that will be deleted after 5 seconds
+        # Send a temporary notification
         temp_msg = await context.bot.send_message(
             chat_id=chat_id,
-            text=f"✅ {query.from_user.mention_html()} has joined the channel and will be unmuted in 5 seconds.",
+            text=f"✅ {query.from_user.mention_html()} has been verified and will be muted for 5 seconds as a verification delay.",
             parse_mode='HTML'
         )
         
-        # Schedule full unmute after 5 seconds
-        async def full_unmute_after_delay():
-            await asyncio.sleep(5)
+        # Schedule a 5-second mute after unmute
+        async def temporary_mute_after_delay():
+            await asyncio.sleep(2)  # Wait 2 seconds first to ensure unmute is processed
+            
             try:
-                # Give full permissions after 5 seconds
-                full_permissions = ChatPermissions(
-                    can_send_messages=True,
-                    can_send_audios=True,
-                    can_send_documents=True,
-                    can_send_photos=True,
-                    can_send_videos=True,
-                    can_send_video_notes=True,
-                    can_send_voice_notes=True,
-                    can_send_polls=True,
-                    can_send_other_messages=True,
-                    can_add_web_page_previews=True
+                # Apply 5-second temporary mute
+                mute_permissions = ChatPermissions(
+                    can_send_messages=False,
+                    can_send_audios=False,
+                    can_send_documents=False,
+                    can_send_photos=False,
+                    can_send_videos=False,
+                    can_send_video_notes=False,
+                    can_send_voice_notes=False,
+                    can_send_polls=False,
+                    can_send_other_messages=False,
+                    can_add_web_page_previews=False
                 )
-                await chat.restrict_member(user_id, full_permissions)
-                logger.info(f"User {user_id} fully unmuted in chat {chat_id} after 5-second delay")
+                
+                mute_duration = 5  # 5 seconds
+                until_date = int(time.time()) + mute_duration
+                
+                await chat.restrict_member(
+                    user_id, 
+                    mute_permissions,
+                    until_date=until_date
+                )
+                
+                logger.info(f"User {user_id} temporarily muted for 5 seconds in chat {chat_id}")
+                
+                # Send notification about temporary mute
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"⏳ {query.from_user.mention_html()} has been muted for 5 seconds as a verification delay. You'll be unmuted automatically.",
+                    parse_mode='HTML'
+                )
+                
+                # Schedule final unmute after 5 seconds
+                async def final_unmute():
+                    await asyncio.sleep(5)
+                    try:
+                        await chat.restrict_member(user_id, full_permissions)
+                        logger.info(f"User {user_id} finally unmuted after 5-second temporary mute")
+                        
+                        await context.bot.send_message(
+                            chat_id=chat_id,
+                            text=f"✅ {query.from_user.mention_html()} verification complete! You can now participate.",
+                            parse_mode='HTML'
+                        )
+                    except Exception as e:
+                        logger.error(f"Error in final unmute: {e}")
+                
+                asyncio.create_task(final_unmute())
+                
             except Exception as e:
-                logger.error(f"Error in delayed unmute: {e}")
+                logger.error(f"Error in temporary mute: {e}")
         
-        # Schedule deletion of the temp message after 5 seconds
+        # Schedule deletion of the temp message after 3 seconds
         async def delete_temp_message():
-            await asyncio.sleep(5)
+            await asyncio.sleep(3)
             try:
                 await context.bot.delete_message(
                     chat_id=chat_id,
@@ -540,7 +567,7 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.warning(f"Could not delete temp message: {e}")
         
         # Run both tasks in the background
-        asyncio.create_task(full_unmute_after_delay())
+        asyncio.create_task(temporary_mute_after_delay())
         asyncio.create_task(delete_temp_message())
         
     except Exception as e:
