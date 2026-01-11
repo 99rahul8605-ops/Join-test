@@ -373,6 +373,16 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if chat.type == 'private' or user.is_bot:
         return
     
+    # Check if message is recent (within 10 seconds)
+    message_date = update.message.date
+    if message_date:
+        message_time = message_date.timestamp()
+        current_time = time.time()
+        
+        # Only process messages from the last 10 seconds
+        if current_time - message_time > 10:
+            return
+    
     fsub_data = fsub_collection.find_one({'chat_id': chat.id})
     if not fsub_data:
         return
