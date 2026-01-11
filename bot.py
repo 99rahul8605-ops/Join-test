@@ -468,17 +468,17 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        # IMPORTANT: Instead of unmuting immediately, mute for 10 seconds
-        # This is the key fix - we're not unmuting, we're muting for 10 seconds
+        # IMPORTANT: Instead of unmuting immediately, mute for 30 seconds
+        # This is the key fix - we're not unmuting, we're muting for 30 seconds
         
         # Update the button message
         await query.edit_message_text(
             f"✅ {query.from_user.mention_html()} has verified channel membership!\n\n"
-            "⏳ You have been muted for 10 seconds.",
+            "⏳ You have been muted for 30 seconds.",
             parse_mode='HTML'
         )
         
-        # Mute user for 10 seconds with ALL permissions set to False
+        # Mute user for 30 seconds with ALL permissions set to False
         permissions = ChatPermissions(
             can_send_messages=False,
             can_send_audios=False,
@@ -495,8 +495,8 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             can_pin_messages=False
         )
         
-        # Set mute for 10 seconds
-        mute_duration = 10
+        # Set mute for 30 seconds
+        mute_duration = 30
         until_date = datetime.now() + timedelta(seconds=mute_duration)
         
         await context.bot.restrict_chat_member(
@@ -509,18 +509,18 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Send notification
         await context.bot.send_message(
             chat_id=chat_id,
-            text=f"⏳ {query.from_user.mention_html()} has been muted for 10 seconds after verifying channel membership.",
+            text=f"⏳ {query.from_user.mention_html()} has been muted for 30 seconds after verifying channel membership.",
             parse_mode='HTML'
         )
         
         # Delete previous warnings
         await delete_previous_warnings(chat_id, user_id, context)
         
-        # Schedule a message to be sent after 10 seconds to notify user is now unmuted
-        # We'll use a simple approach - send a message after 10 seconds
+        # Schedule a message to be sent after 30 seconds to notify user is now unmuted
+        # We'll use a simple approach - send a message after 30 seconds
         context.job_queue.run_once(
             callback=send_unmute_notification,
-            when=10,
+            when=30,
             data={
                 'chat_id': chat_id,
                 'user_id': user_id,
@@ -536,7 +536,7 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def send_unmute_notification(context: ContextTypes.DEFAULT_TYPE):
-    """Send notification after 10 seconds that user is now unmuted"""
+    """Send notification after 30 seconds that user is now unmuted"""
     job_data = context.job.data
     chat_id = job_data['chat_id']
     user_id = job_data['user_id']
@@ -546,7 +546,7 @@ async def send_unmute_notification(context: ContextTypes.DEFAULT_TYPE):
         # Send notification that mute period has ended
         await context.bot.send_message(
             chat_id=chat_id,
-            text=f"✅ {user_name} 10-second mute period has ended. You can now chat normally.",
+            text=f"✅ {user_name} 30-second mute period has ended. You can now chat normally.",
             parse_mode='HTML'
         )
         
