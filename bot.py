@@ -468,14 +468,7 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        # First, update the button message to show user will be muted for 10 seconds
-        await query.edit_message_text(
-            f"✅ {query.from_user.mention_html()} has verified channel membership!\n\n"
-            "⏳ You will be muted for 10 seconds and then fully unmuted...",
-            parse_mode='HTML'
-        )
-        
-        # Mute user for 10 seconds instead of immediately unmuting
+        # Mute user for 10 seconds immediately
         permissions = ChatPermissions(
             can_send_messages=False,
             can_send_audios=False,
@@ -493,7 +486,7 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         # Set mute for 10 seconds
-        mute_duration = 10  # 10 seconds
+        mute_duration = 10
         until_date = int(time.time()) + mute_duration
         
         await context.bot.restrict_chat_member(
@@ -503,78 +496,45 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             until_date=until_date
         )
         
-        # Send notification about 10-second mute
-        notification_msg = await context.bot.send_message(
-            chat_id=chat_id,
-            text=f"⏳ {query.from_user.mention_html()} has been muted for 10 seconds and will be fully unmuted afterwards.",
+        # Update the button message to show user will be muted for 10 seconds
+        await query.edit_message_text(
+            f"✅ {query.from_user.mention_html()} has verified channel membership!\n\n"
+            "⏳ You have been muted for 10 seconds and will be automatically unmuted afterwards.",
             parse_mode='HTML'
         )
         
-        # Wait for 10 seconds
-        await asyncio.sleep(10)
+        # Send notification about 10-second mute
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"⏳ {query.from_user.mention_html()} has verified channel membership and has been muted for 10 seconds. They will be automatically unmuted afterwards.",
+            parse_mode='HTML'
+        )
         
-        # Now completely unmute the user
-        try:
-            # Get the chat to check its permissions
-            chat = await context.bot.get_chat(chat_id)
-            
-            if chat.permissions:
-                # Use the group's default permissions
-                await context.bot.restrict_chat_member(
-                    chat_id=chat_id,
-                    user_id=user_id,
-                    permissions=chat.permissions,
-                    until_date=0  # 0 means remove time restriction
-                )
-            else:
-                # Grant all standard permissions
-                permissions = ChatPermissions(
-                    can_send_messages=True,
-                    can_send_audios=True,
-                    can_send_documents=True,
-                    can_send_photos=True,
-                    can_send_videos=True,
-                    can_send_video_notes=True,
-                    can_send_voice_notes=True,
-                    can_send_polls=True,
-                    can_send_other_messages=True,
-                    can_add_web_page_previews=True,
-                    can_change_info=False,
-                    can_invite_users=True,
-                    can_pin_messages=False
-                )
-                await context.bot.restrict_chat_member(
-                    chat_id=chat_id,
-                    user_id=user_id,
-                    permissions=permissions,
-                    until_date=0  # 0 means remove time restriction
-                )
-            
-            # Delete the 10-second notification
-            try:
-                await context.bot.delete_message(
-                    chat_id=chat_id,
-                    message_id=notification_msg.message_id
-                )
-            except:
-                pass
-            
-            # Send final unmute message
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=f"✅ {query.from_user.mention_html()} has been fully unmuted! Welcome to the group.",
-                parse_mode='HTML'
-            )
-            
-            await delete_previous_warnings(chat_id, user_id, context)
-            
-        except Exception as e:
-            logger.error(f"Error unmuting user after 10 seconds: {e}")
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=f"⚠️ {query.from_user.mention_html()} - Failed to fully unmute. Please contact an admin.",
-                parse_mode='HTML'
-            )
+        # Wait for 10 seconds (using a simple delay)
+        # Note: We're not using asyncio.sleep because it might block the bot
+        # Instead, we'll let Telegram's built-in timer handle the unmute
+        
+        # IMPORTANT: We need to set up a job to unmute after 10 seconds
+        # We'll use job queue for this
+        
+        # Schedule unmute after 10 seconds
+        job_name = f"unmute_{chat_id}_{user_id}"
+        
+        # Remove any existing job with same name
+        current_jobs = context.job_queue.get_jobs_by_name(job_name)
+        for job in current_jobs:
+            job.schedule_removal()
+        
+        # Schedule new job
+        context.job_queue.run_once(
+            callback=unmute_after_delay,
+            when=10,
+            data={"chat_id": chat_id, "user_id": user_id, "query_message_id": query.message.message_id, "query_chat_id": query.message.chat_id},
+            name=job_name
+        )
+        
+        # Delete previous warnings
+        await delete_previous_warnings(chat_id, user_id, context)
         
     except Exception as e:
         logger.error(f"Error in unmute process: {e}")
@@ -582,6 +542,72 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "⚠️ Failed to process unmute request. Please contact an admin.",
             show_alert=True
         )
+
+async def unmute_after_delay(context: ContextTypes.DEFAULT_TYPE):
+    """Callback function to unmute user after 10 seconds"""
+    job_data = context.job.data
+    chat_id = job_data["chat_id"]
+    user_id = job_data["user_id"]
+    
+    try:
+        # Get the chat to check its permissions
+        chat = await context.bot.get_chat(chat_id)
+        
+        if chat.permissions:
+            # Use the group's default permissions
+            await context.bot.restrict_chat_member(
+                chat_id=chat_id,
+                user_id=user_id,
+                permissions=chat.permissions,
+                until_date=0  # 0 means remove time restriction
+            )
+        else:
+            # Grant all standard permissions
+            permissions = ChatPermissions(
+                can_send_messages=True,
+                can_send_audios=True,
+                can_send_documents=True,
+                can_send_photos=True,
+                can_send_videos=True,
+                can_send_video_notes=True,
+                can_send_voice_notes=True,
+                can_send_polls=True,
+                can_send_other_messages=True,
+                can_add_web_page_previews=True,
+                can_change_info=False,
+                can_invite_users=True,
+                can_pin_messages=False
+            )
+            await context.bot.restrict_chat_member(
+                chat_id=chat_id,
+                user_id=user_id,
+                permissions=permissions,
+                until_date=0  # 0 means remove time restriction
+            )
+        
+        # Send final unmute message
+        user = await context.bot.get_chat_member(chat_id, user_id)
+        user_name = user.user.mention_html() if user.user else f"User {user_id}"
+        
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"✅ {user_name} has been fully unmuted after 10 seconds! Welcome to the group.",
+            parse_mode='HTML'
+        )
+        
+        # Try to update the original button message
+        try:
+            await context.bot.edit_message_text(
+                chat_id=job_data.get("query_chat_id", chat_id),
+                message_id=job_data.get("query_message_id"),
+                text=f"✅ {user_name} has been fully unmuted after 10 seconds!",
+                parse_mode='HTML'
+            )
+        except:
+            pass
+            
+    except Exception as e:
+        logger.error(f"Error unmuting user after 10 seconds: {e}")
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != os.getenv('OWNER_ID'):
