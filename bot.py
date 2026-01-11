@@ -152,7 +152,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/help - This message\n"
         "/fsub [@channel|ID|reply] - Set required channel\n"
         "/disconnect - Stop forcing subscription\n"
-        "/setdelay [seconds] - Set unmute delay (default: 1)\n"
+        "/setdelay [seconds] - Set unmute delay (0-30 only)\n"
         "/getdelay - Show current unmute delay\n\n"
         "I'll mute anyone who hasn't joined the required channel for 5 minutes."
     )
@@ -212,7 +212,7 @@ async def save_fsub_channel(chat_id: int, channel: str, update: Update, context:
             {'$set': {
                 'channel': channel, 
                 'channel_id': chat.id,
-                'unmute_delay': 1  # Default unmute delay is 1 second
+                'unmute_delay': 0  # Default unmute delay is 0 seconds (immediate)
             }},
             upsert=True
         )
@@ -298,25 +298,21 @@ async def set_unmute_delay(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text(
             "Usage: /setdelay [seconds]\n"
-            "Example: /setdelay 5 - Users will be muted for 5 seconds after clicking 'Unmute Me'\n"
-            "Note: 0 and 30 seconds are not supported. Use values between 1-29 or 31-3600."
+            "Example: /setdelay 0 - Immediate unmute (default)\n"
+            "Example: /setdelay 10 - Users muted for 10 seconds\n\n"
+            "⚠️ Only values between 0-30 seconds are allowed!"
         )
         return
     
     try:
         delay = int(context.args[0])
-        if delay == 0 or delay == 30:
-            await update.message.reply_text(
-                "❌ 0 and 30 seconds are not supported. Please choose a different value.\n"
-                "Use values between 1-29 or 31-3600 seconds."
-            )
-            return
         
-        if delay < 1:
-            await update.message.reply_text("❌ Delay cannot be less than 1 second.")
-            return
-        if delay > 3600:  # 1 hour max
-            await update.message.reply_text("❌ Delay cannot be more than 3600 seconds (1 hour).")
+        # ONLY ALLOW 0-30 SECONDS
+        if delay < 0 or delay > 30:
+            await update.message.reply_text(
+                "❌ Only values between 0-30 seconds are allowed!\n"
+                "Please choose a value between 0 and 30 (inclusive)."
+            )
             return
         
         # Update the unmute delay in database
@@ -325,9 +321,14 @@ async def set_unmute_delay(update: Update, context: ContextTypes.DEFAULT_TYPE):
             {'$set': {'unmute_delay': delay}}
         )
         
-        await update.message.reply_text(
-            f"✅ Unmute delay set to {delay} seconds. Users will be muted for {delay} seconds after clicking 'Unmute Me'."
-        )
+        if delay == 0:
+            await update.message.reply_text(
+                "✅ Unmute delay set to 0 seconds. Users will be unmuted immediately after clicking 'Unmute Me'."
+            )
+        else:
+            await update.message.reply_text(
+                f"✅ Unmute delay set to {delay} seconds. Users will be muted for {delay} seconds after clicking 'Unmute Me'."
+            )
     except ValueError:
         await update.message.reply_text("❌ Invalid number. Please provide a valid number of seconds.")
 
@@ -344,14 +345,22 @@ async def get_unmute_delay(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Force subscription is not set for this group.")
         return
     
-    delay = fsub_data.get('unmute_delay', 1)
+    delay = fsub_data.get('unmute_delay', 0)
     
-    await update.message.reply_text(
-        f"Current unmute delay: {delay} seconds\n\n"
-        f"Users will be muted for {delay} seconds after clicking 'Unmute Me'.\n"
-        "To change this, use /setdelay [seconds]\n\n"
-        "Note: 0 and 30 seconds are not supported."
-    )
+    if delay == 0:
+        await update.message.reply_text(
+            "Current unmute delay: 0 seconds (immediate unmute)\n\n"
+            "Users will be unmuted immediately after clicking 'Unmute Me'.\n"
+            "To change this, use /setdelay [seconds]\n\n"
+            "⚠️ Only values between 0-30 seconds are allowed!"
+        )
+    else:
+        await update.message.reply_text(
+            f"Current unmute delay: {delay} seconds\n\n"
+            f"Users will be muted for {delay} seconds after clicking 'Unmute Me'.\n"
+            "To change this, use /setdelay [seconds]\n\n"
+            "⚠️ Only values between 0-30 seconds are allowed!"
+        )
 
 async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message and update.message.forward_from_chat and update.message.forward_from_chat.type == 'channel':
@@ -555,8 +564,8 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        # Get unmute delay from database (default is 1)
-        unmute_delay = fsub_data.get('unmute_delay', 1)
+        # Get unmute delay from database (default is 0)
+        unmute_delay = fsub_data.get('unmute_delay', 0)
         
         # Update the button message
         await query.edit_message_text(
@@ -565,7 +574,7 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         if unmute_delay > 0:
-            # Mute user for the configured delay
+            # Mute user for the configured delay (0-30 seconds)
             permissions = ChatPermissions(
                 can_send_messages=False,
                 can_send_audios=False,
@@ -582,7 +591,7 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 can_pin_messages=False
             )
             
-            # Set mute for the configured delay
+            # Set mute for the configured delay (0-30 seconds)
             until_date = datetime.now() + timedelta(seconds=unmute_delay)
             
             await context.bot.restrict_chat_member(
@@ -602,7 +611,7 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 }
             )
         else:
-            # This shouldn't happen since we don't allow 0, but just in case
+            # Immediate unmute (delay = 0)
             await complete_unmute_immediately(chat_id, user_id, context)
         
         # Delete previous warnings
@@ -616,7 +625,7 @@ async def unmute_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def complete_unmute_immediately(chat_id, user_id, context):
-    """Immediately unmute the user"""
+    """Immediately unmute the user (for delay = 0)"""
     try:
         # Get the chat to check its permissions
         chat = await context.bot.get_chat(chat_id)
